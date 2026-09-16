@@ -47,11 +47,25 @@ void assertMileageStoppedWithLiveSpeed() {
   assert(mph==0 && motorStep==0);
 }
 int main() {
+  static_assert(Board::motor1==PIN_PC0 && Board::motor2==PIN_PC1 &&
+                Board::motor3==PIN_PC6 && Board::motor4==PIN_PC7, "DB Nano motor harness");
+  static_assert(offsetof(StoredState,crc)==30 && offsetof(StoredState,odoFraction)==16 &&
+                offsetof(StoredState,tripFraction)==20, "State binary compatibility");
+  static_assert(offsetof(DisplayLayout,crc)==15 && offsetof(DisplayLayout,schema)==14,
+                "Layout binary compatibility");
+  static_assert(RecordMagic==0x53503137UL && LayoutMagic==0x44503138UL &&
+                MigrationAddress==0x70 && CommitMarker==0xA5, "FRAM protocol unchanged");
+  assert(SlotAddress[0]==0x80 && SlotAddress[1]==0xC0);
+  assert(LayoutSlotAddress[0]==0x100 && LayoutSlotAddress[1]==0x120);
+  beginVehicleIO(); assert(adcResolution==10 && adcReference==VDD);
+#if DEBUG_SERIAL
+  setup(); assert(Serial3.baud==115200);
+#endif
   const uint8_t assigned[] = {speedPulsePin,maxSecondChannelPin,motor1,motor2,motor3,motor4,
     oledMosi,oledMiso,oledSck,oledCs,oledDc,oledReset,framSda,framScl,
     encoderA,encoderB,encoderKey,calSwitchPin,modeButtonPin,rpmPulsePin,afrInputPin,dimmerInputPin};
   for (unsigned i=0;i<sizeof(assigned);++i) {
-    assert(assigned[i]!=PIN_PC0 && assigned[i]!=PIN_PC1 && assigned[i]!=PIN_PC6 && assigned[i]!=PIN_PC7);
+    assert(assigned[i]!=PIN_PB0 && assigned[i]!=PIN_PB1 && assigned[i]!=PIN_PB2 && assigned[i]!=PIN_PB3);
     assert(assigned[i]!=PIN_PF6);
     for (unsigned j=0;j<i;++j) assert(assigned[i]!=assigned[j]);
   }

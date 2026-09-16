@@ -1,5 +1,5 @@
 #pragma once
-// AVR128DA48 port of Robert Cipriani's v1.12. See README.md.
+// AVR128DB48 port of Robert Cipriani's v1.12. See README.md.
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -17,12 +17,18 @@
 #error "Enable U8G2_16BIT in the U8g2 library for the 256-pixel-wide OLED"
 #endif
 
-#if !defined(__AVR_AVR128DA48__)
-#error "Select DxCore AVR128DA48"
+#if !defined(__AVR_AVR128DB48__)
+#error "Select DxCore AVR128DB48"
 #endif
 
+#if defined(MVIO_ENABLED)
+#error "Select DxCore MVIO Disabled; keep VDDIO2 tied to VDD"
+#endif
+
+#ifndef DEBUG_SERIAL
 #define DEBUG_SERIAL 0
-const char VERSION[] = "DA 1.0";
+#endif
+const char VERSION[] = "DB 1.0";
 using namespace Board;
 bool calibrationInputsValid = false;
 bool encoderButtonReading = HIGH;

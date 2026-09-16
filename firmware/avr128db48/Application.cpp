@@ -34,7 +34,7 @@ void serviceMotion() {
 void setup() {
   Watchdog::begin();
 #if DEBUG_SERIAL
-  Serial1.begin(115200); // Curiosity Nano CDC UART on PC0/PC1
+  Serial3.begin(115200); // EV35L43A CDC UART: PB0 TX / PB1 RX
 #endif
   beginVehicleIO();
   vehicleSpeed.begin(onVssPulse);

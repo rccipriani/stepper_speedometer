@@ -1,18 +1,19 @@
-AVR128DA48 port of Robert Cipriani's stepper speedometer v1.12
+AVR128DB48 / EV35L43A port of Robert Cipriani's stepper speedometer v1.12
 ================================================================
 
-Open `avr128da48.ino` in this directory. The historical Nano sketches remain
+Open `avr128db48.ino` in this directory. The historical Nano sketches remain
 unchanged; do not compile the repository root as one Arduino sketch.
 
-This is the first Arduino/DxCore port, compiled and host-tested but not yet
-tested on the physical instrument. No hardware was flashed or fuses changed.
+This Arduino/DxCore port targets AVR128DB48. The earlier DA build was compiled,
+but the DB target build is not yet verified. It has not been tested on the
+physical instrument. No hardware was flashed or fuses changed.
 
 Porting decisions
 -----------------
 
 The MCU-specific parts of v1.12 were its ATmega328P guard, Nano pin numbers,
 MCP23017 calibration input transport, Wire timeout API, ADC assumptions, and
-blocking Switec homing/startup. Its atomic pulse snapshots work on AVR DA too.
+blocking Switec homing/startup. Its atomic pulse snapshots work on AVR Dx too.
 Older historical versions also contain pin-change-interrupt/register code;
 they are not the source of this port.
 
@@ -32,7 +33,7 @@ separate hardware boundaries:
 | `StorageLayout.h` | Packed records, schema identifiers and all FRAM addresses |
 | `FramDevice.h` | Checked, bounded Wire transactions; no heap-backed device wrapper |
 | `VehicleIO.h`, `Controls.h`, `AnalogInputs.h` | Native calibration inputs, controls, optional conditioned analog inputs |
-| `BoardConfig.h`, `Watchdog.h` | Physical pin assignments and isolated AVR DA watchdog support |
+| `BoardConfig.h`, `Watchdog.h` | Physical pin assignments and isolated AVR Dx watchdog support |
 
 Preserved behavior
 ------------------
@@ -86,28 +87,85 @@ Intentional behavior changes
 Proposed wiring
 ---------------
 
-Use MCU port labels, not classic Nano pin numbers. All assignments are in
-`BoardConfig.h`. These avoid the Curiosity Nano's CDC UART (PC0/PC1), LED/button
-(PC6/PC7), reset and UPDI. See the [Microchip board schematic and user guide](https://www.microchip.com/content/dam/mchp/documents/MCU08/ProductDocuments/UserGuides/AVR128DA48-Curiosity-Nano-UG-DS50002971B.pdf).
+Use MCU port labels, not classic Nano numbers. This map was checked against the
+[EV35L43A header pinout](https://ww1.microchip.com/downloads/aemDocuments/documents/MCU08/ProductDocuments/BoardDesignFiles/AVR128DB48-Curiosity-Nano-Pinout.pdf)
+and the installed DxCore 1.6.2 `variants/48pin-standard/pins_arduino.h`.
+All pins in the following application table are exposed on the board headers.
+The numeric column gives DxCore Arduino IDs, not physical package pin numbers.
 
-| Signal | AVR128DA48 port pin |
-| --- | --- |
-| X27 wires, original driver order 1/2/3/4 | PB0 / PB1 / PB2 / PB3 |
-| OLED MOSI / SCK / CS | PA4 / PA6 / PA7 |
-| OLED D/C / RESET | PE0 / PE1 |
-| FRAM SDA / SCL, address 0x50 | PA2 / PA3 |
-| MAX9924 conditioned VSS, rising edge | PC2 |
-| Encoder S1 / S2 / KEY (to ground) | PC4 / PC5 / PE2 |
-| Calibration harness detect / mode button (to ground) | PE3 / PD1 |
-| Reserved conditioned MAX channel 2 / RPM | PC3 / PD2 |
-| Optional AFR / filtered analog dimmer | PD3 / PD4 |
+| Signal | DB48 port pins (`PIN_` constants) | DxCore IDs |
+| --- | --- | --- |
+| X27 driver order 1/2/3/4 | PC0 / PC1 / PC6 / PC7 | 14 / 15 / 20 / 21 |
+| OLED MOSI / MISO reserved / SCK / CS | PA4 / PA5 / PA6 / PA7 | 4 / 5 / 6 / 7 |
+| OLED D/C / RESET | PE0 / PE1 | 30 / 31 |
+| FRAM SDA / SCL, address 0x50 | PA2 / PA3 | 2 / 3 |
+| Conditioned VSS | PC2 | 16 |
+| Encoder A / B / KEY | PC4 / PC5 / PE2 | 18 / 19 / 32 |
+| Calibration detect / mode button | PE3 / PD1 | 33 / 23 |
+| Future MAX channel 2 / RPM | PC3 / PD2 | 17 / 24 |
+| Future AFR / dimmer | PD3 / PD4 | 25 / 26 |
+| CDC/debug TX / RX (reserved) | PB0 / PB1 | 8 / 9 |
 
-PA5 is reserved as SPI MISO even though the OLED does not use it. Spare pins
-include PA0/PA1, PB4/PB5, PD0/PD5/PD6/PD7, PF0â€“PF5. PC0/PC1 can provide
-`Serial1` through the on-board CDC interface. Future CAN requires an external
-CAN controller as well as its transceiver; a transceiver alone is insufficient.
+The sole harness change is X27 PB0/PB1/PB2/PB3 -> PC0/PC1/PC6/PC7,
+keeping coil/driver order unchanged. On EV35L43A, PB0/PB1 connect to the
+CDC debugger UART and PB2/PB3 to the button/LED and debug GPIOs. Reusing them
+for the motor would require board modifications or restrictions on debugger
+use. `Serial3` (USART3 default route) now provides optional debug output.
+Do not enable Serial1 or SPI1 over the new motor/VSS pins.
+[Debugger connections](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-34C7F466-EEE1-4285-90A6-23E5DEBA4679.html).
 
-For external regulated 5 V, follow Microchip's [external-supply instructions](https://onlinedocs.microchip.com/oxy/GUID-71FEFD75-E46F-4322-9BEB-8C68686D4A50-en-US-2/GUID-BAA668EF-E4C0-44A9-866D-9A3B949DF2EA.html):
+SPI0 stays on its default PA4–PA7 route; `SPI.pins()` selects it before display
+initialization. TWI0 stays on PA2/PA3 through `Wire.pins()` before `Wire.begin()`.
+Neither bus requires a new PORTMUX alternate route. GPIO interrupt + micros()
+VSS capture and both explicit ADC calls are unchanged. PD3/PD4 are ADC0
+AIN3/AIN4; DxCore's DA/DB implementation selects ADC_RESSEL_10BIT for resolution
+10 and VREF.ADC0REF for VDD, retaining the application's 0–1023 arithmetic.
+No OPAMP, EVSYS or TCB capture setup is added.
+
+PF6/reset and PF7/UPDI remain reserved. PA0/PA1 carry the fitted 16 MHz crystal;
+PF0/PF1 carry the 32.768 kHz crystal. Those header connections are open by default
+and are not spare GPIO without board modifications. Keep the existing internal
+24 MHz clock selection; neither crystal is enabled by this refactor.
+[HF crystal](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-9E425E63-BABE-4274-BF1D-58ABCA9B30C0.html),
+[LF crystal](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-CDE617E7-5792-4374-9250-E05A4BBA9198.html).
+Unassigned header GPIOs include PB4/PB5, PD0/PD5/PD6/PD7 and PF2–PF5.
+Future CAN still requires an external controller and transceiver.
+
+Why DB48 / future resources
+--------------------------
+
+The closely related AVR Dx architecture preserves this firmware's hardware
+interfaces, while DB48 adds MVIO for future mixed-voltage peripherals and three
+internal op amps for future analog instrumentation. Neither is required today.
+
+PORTC (PC0–PC7: motor, VSS, second MAX reservation and encoder A/B) is the
+VDDIO2 domain. Leave the board's R204 0-ohm link fitted so VDDIO2 follows VDD,
+with the target supply configured for conventional 5-V operation. Do not feed
+a separate voltage into J212 or remove R204 for this build. Explicitly select
+DxCore **MVIO Disabled** (`mvio=disabled`); the compiler guard rejects the
+MVIO-enabled selection. The associated MVSYSCFG fuse field is `10` in DxCore
+1.6.2; verify the programmed fuse agrees with the selection. Compilation alone
+does not program fuses. No firmware MVIO initialization is introduced.
+[Board MVIO configuration](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-4F1B01B4-BBA9-490D-BFC3-F84D1582775E.html).
+
+The op amps stay disabled. Existing pin assignments overlap their external
+terminals; this migration does not claim that all three are freely connectable:
+
+| Op amp | INP / OUT / INN | Existing assignments |
+| --- | --- | --- |
+| OP0 | PD1 / PD2 / PD3 | mode button / future RPM / future AFR |
+| OP1 | PD4 / PD5 / PD7 | future dimmer / free / free |
+| OP2 | PE1 / PE2 / PE3 | OLED reset / encoder key / calibration detect |
+
+OP1 is the least constrained future option: PD5/PD7 remain free and PD4's dimmer
+input is currently disabled. Future use must resolve that reservation. No newly
+assigned motor pin consumes an op-amp terminal. OP0/OP2 use would require a later
+harness/resource decision. Internal op amps must operate within their specified
+input common-mode limits; they are not direct battery-voltage high-side shunt
+amplifiers. No current sensing or analog conditioning is implemented.
+[DB device multiplexing table](https://onlinedocs.microchip.com/oxy/GUID-6318BE6B-F1CD-430E-AE84-1881DD64DB3F-en-US-10/GUID-FFC15B69-9C4E-475D-B8A0-47C61A53A842.html).
+
+For external regulated 5 V, follow Microchip's [external-supply instructions](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-BAA668EF-E4C0-44A9-866D-9A3B949DF2EA.html):
 feed VTG, and ground VOFF to disable the on-board regulator when USB is connected.
 VOFF is not a power input. Check the particular OLED/FRAM modules' logic-voltage
 requirements and pull-ups, and the motor's coil current against MCU per-pin/port
@@ -117,7 +175,7 @@ Only conditioned, voltage-compatible vehicle signals belong on MCU inputs.
 Build and verification
 ----------------------
 
-Verified with DxCore 1.6.2, U8g2 2.36.19 and upstream
+The baseline used DxCore 1.6.2, U8g2 2.36.19 and upstream
 [clearwater/SwitecX25](https://github.com/clearwater/SwitecX25). Install SwitecX25
 from its ZIP (it is not in the Arduino library index). Retain its bundled license.
 DxCore's [installation and core documentation](https://github.com/SpenceKonde/DxCore)
@@ -128,10 +186,10 @@ arduino-cli core update-index --additional-urls https://drazzy.com/package_drazz
 arduino-cli core install DxCore:megaavr@1.6.2 --additional-urls https://drazzy.com/package_drazzy.com_index.json
 arduino-cli lib install "U8g2@2.36.19"
 # Install the SwitecX25 ZIP, then:
-arduino-cli compile -b DxCore:megaavr:avrda:chip=avr128da48,clock=24internal firmware/avr128da48
+arduino-cli compile -b DxCore:megaavr:avrdb:chip=avr128db48,clock=24internal,mvio=disabled firmware/avr128db48
 ```
 
-IDE: AVR DA-series **no bootloader**, chip AVR128DA48, internal 24 MHz, default
+IDE: AVR DB-series **no bootloader**, chip AVR128DB48, MVIO Disabled, internal 24 MHz, default
 48-pin mapping, attachInterrupt enabled on all pins, default Wire mode and
 millis timer. Select Microchip Curiosity Nano (nEDBG) when programming. No custom
 timer configuration is needed. U8g2 2.36.19 already enables `U8G2_16BIT`; the
@@ -140,16 +198,16 @@ it only in the sketch while compiling the library with a different setting.
 
 Optional watchdog build: add
 `--build-property compiler.cpp.extra_flags=-DSPEEDOMETER_WATCHDOG_ENABLED=1`.
-It uses the AVR DA 8K-clock watchdog period and feeds once per complete loop.
+It uses the AVR Dx 8K-clock watchdog period and feeds once per complete loop.
 Default is off for bench bring-up; this assumes the watchdog fuse is also off.
 Choose/test brownout and watchdog fuses for the finished hardware separately.
 
 ```sh
-python tests/run_avr128da48_tests.py --compiler /path/to/zig --switec-source /path/to/SwitecX25
+python tests/run_avr128db48_tests.py --compiler /path/to/zig --switec-source /path/to/SwitecX25
 python tests/run_v112_tests.py --compiler /path/to/zig
 ```
 
-The DA tests compile the actual application and real Switec implementation with
+The DB tests compile the actual application and real Switec implementation with
 fake time/GPIO/SPI/Wire. They check unchanged schema definitions and distance
 code against v1.12, speed aging/wrap, mapping, both journals' interrupted commits,
 legacy migration, transport faults, direct encoder inputs, fit protection, and
@@ -159,7 +217,7 @@ startup journals, reconnection, pulse-counter wrap, frozen mileage/fractions,
 continued VSS/needle operation and stop timeout, and absence of further writes.
 Host tests do not measure electrical behavior or ISR latency.
 
-Verified 2026-09-14: both the DA and original v1.12 host suites pass. Default
+Historical DA results, 2026-09-14 (not a DB build): both the DA and original v1.12 host suites pass. Default
 target build: 26,994 bytes flash, 1,239 bytes static RAM; watchdog build:
 26,992 bytes flash, 1,239 bytes static RAM. Remaining compiler warnings are
 signed/unsigned comparisons in the upstream Switec library.
@@ -199,19 +257,19 @@ on fault). The gate stops pulse-driven accumulation, not those user actions.
 
 v1.12's `storageFault()` never returns: it only calls `Motor.update()`, freezing
 mileage but also preventing fresh speed targets and normal control/display work.
-The DA port retains its nonblocking fault behavior and unknown-mileage startup
+The DB port retains its nonblocking fault behavior and unknown-mileage startup
 fallback while now preserving the no-unsavable-accumulation philosophy. The OLED
 continues to show `FRAM ERROR`; this indicates persistence failure, not stopped VSS.
 
 Remaining port differences are the native GPIO calibration transport, checked
 DxCore Wire transactions, cooperative homing/sweep and earlier VSS interrupt
-attachment, explicit 10-bit VDD ADC setup, DA pin mapping,
-optional DA watchdog and Serial1 debug selection, and modular hardware boundaries.
+attachment, explicit 10-bit VDD ADC setup, DB board pin mapping,
+optional Dx watchdog and Serial3 debug selection, and modular hardware boundaries.
 The existing page-buffered display, storage layouts/addresses/CRC/migration,
 distance arithmetic, calibration math and gauge mapping are unchanged. EVSYS/TCB
 is still deferred. Hardware timing and electrical behavior remain unvalidated.
 
-Reverified 2026-09-16: the AVR DA host suite (using the real Switec driver) and
+Historical DA audit, 2026-09-16: the AVR DA host suite (using the real Switec driver) and
 the original v1.12 host suite both pass. Added assertions preserve nonzero
 odometer/trip fractions after a failed save and compare FRAM contents before
 and after missing-device, short-read and corrupt-journal startup, ensuring no
@@ -219,3 +277,43 @@ fallback odometer is committed. The mileage gate and startup-splash edits were
 already present in the working tree when this audit resumed and were retained.
 No new target build was obtained in this audit: Windows Application Control
 blocked the installed Arduino CLI. The target sizes above are historical.
+
+DB migration verification
+-------------------------
+
+Baseline: clean git tree at 6fd15d5, including the Savoy splash and latched FRAM
+fault mileage gate. Display.h, Distance.h, VehicleSpeed.h, Speedometer.h,
+Storage.h, StorageLayout.h and the other application subsystems are unchanged.
+Only the device/build guard, version label, board motor pins and optional CDC
+UART change. No persisted bytes, schema, address, CRC or migration code changes.
+The tests retain legacy struct-source equality and distance-source equality,
+plus size/offset/magic/address checks and all fault/startup scenarios.
+
+The compiler symbol `__AVR_AVR128DB48__` was verified in the installed DxCore
+AVR-GCC `device-specs/specs-avr128db48` (*cpp) and AVR-LibC `avr/io.h`, rather
+than inferred from the DA symbol. The installed DxCore 1.6.2 boards.txt selects
+`avr128db48` and `48pin-standard`; its variant supplies every PIN_* constant
+and the default SPI0/TWI0/USART3 routes above. See the pinned
+[DxCore source](https://github.com/SpenceKonde/DxCore/tree/1.6.2/megaavr).
+
+A real DB compile was attempted with the documented FQBN and the local
+port_support/arduino-cli.yaml configuration. Windows Application Control
+blocked arduino-cli.exe from starting. No DB target binary, memory-size result,
+programming or fuse change is claimed. The old DA memory sizes remain historical.
+
+Before hardware acceptance, verify the board revision and 5-V VTG/VDDIO2,
+MVIO fuse, X27 coil order/current and PORTC aggregate drive limits, CDC UART,
+UPDI programming, I2C/SPI waveforms, ADC scaling, cooperative stepping jitter,
+VSS aging/stop timeout, and power-cut/FRAM-fault behavior under display load.
+Re-run both default and watchdog-enabled DB target builds once CLI execution
+is permitted. Preserve the existing bench checks above.
+
+Host results for this migration: v1.07, v1.08, v1.09, v1.11 and v1.12 passed,
+including v1.12 enabled/inverted analog configurations. The DB48 debug-enabled
+suite (`--debug-serial`) passed all existing behavior tests plus new ADC, pin
+reservation, binary-offset and CDC assertions. The default DB48 host executable
+compiled successfully, but Windows Application Control blocked its execution
+(WinError 4551); its runtime result is not claimed as a pass. This restriction
+is separate from the blocked Arduino target compilation. `git diff --check`
+passed (with CR-at-EOL handling for the repository's Windows line endings);
+new/renamed files were also checked for trailing whitespace.
