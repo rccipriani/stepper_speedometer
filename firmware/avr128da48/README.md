@@ -60,13 +60,21 @@ Intentional behavior changes
   still be missed during peripheral work; verify maximum hand rotation speed.
 * Homing is scheduled at a minimum 800 us per step, then the existing full-scale
   sweep and two 1-second holds run as a state machine. Controls, distance and
-  display continue during startup; the old startup splash is removed. No
+  display servicing continue during startup; the original `Savoy ` + version splash
+  remains visible through homing, sweep and holds, unless `FRAM ERROR` takes
+  precedence. Normal readings resume when startup completes. No
   `delay()`/blocking Switec calls run. Missed deadlines extend motion rather
   than issuing a burst of catch-up steps. The original 510-step homing travel
   is preserved: validate that it reaches the zero stop over this instrument's
   possible needle travel before accepting it. Homing does not sense the stop.
 * A FRAM transport/verification failure latches `FRAM ERROR` and disables further
-  writes until reset. The needle and RAM distance calculations continue. If
+  writes until reset. The speedometer remains operational: interrupt-based
+  VSS measurement, speed updates and needle servicing continue. Mileage persistence
+  is operational only when mileage is known, no storage fault is latched, and the
+  FRAM transport is healthy. Otherwise odometer/trip accumulation (including both
+  fractional remainders) stops; pulse totals are still consumed so no unsavable
+  backlog builds up. Previously accumulated, uncommitted mileage is not rolled
+  back or claimed to be saved. Reconnecting FRAM does not clear the latch. If
   startup mileage is unreadable, defaults (ratio 1, offset 0) drive the needle,
   mileage stays marked unknown, and default mileage is never committed. If both
   journals are invalid after migration, stale legacy data is not restored.
@@ -145,7 +153,11 @@ The DA tests compile the actual application and real Switec implementation with
 fake time/GPIO/SPI/Wire. They check unchanged schema definitions and distance
 code against v1.12, speed aging/wrap, mapping, both journals' interrupted commits,
 legacy migration, transport faults, direct encoder inputs, fit protection, and
-cooperative startup. Host tests do not measure electrical behavior or ISR latency.
+cooperative startup. Fault tests explicitly cover failed mileage/layout writes,
+latched faults with healthy transport, short reads, missing FRAM, unreadable
+startup journals, reconnection, pulse-counter wrap, frozen mileage/fractions,
+continued VSS/needle operation and stop timeout, and absence of further writes.
+Host tests do not measure electrical behavior or ISR latency.
 
 Verified 2026-09-14: both the DA and original v1.12 host suites pass. Default
 target build: 26,994 bytes flash, 1,239 bytes static RAM; watchdog build:
@@ -174,3 +186,36 @@ separate input modules without changing mileage storage or calibration math.
 
 Original project credits remain in the historical v1.12 source: Luke Hurst,
 Kevin Gale / Walter Clark, Guy Carpenter, PJRC and Trewjohn2001.
+
+Persistence audit against v1.12 (2026-09-16)
+------------------------------------------
+
+The persistence runtime correction is the persistence-health gate in
+`collectDistance()`; `addDistance()` remains byte-for-byte identical to v1.12.
+`mileagePersistenceOperational()` explicitly separates known mileage and healthy
+persistence from the independent speedometer. Existing controls remain active;
+calibration and explicit trip-reset handling are unchanged (writes remain blocked
+on fault). The gate stops pulse-driven accumulation, not those user actions.
+
+v1.12's `storageFault()` never returns: it only calls `Motor.update()`, freezing
+mileage but also preventing fresh speed targets and normal control/display work.
+The DA port retains its nonblocking fault behavior and unknown-mileage startup
+fallback while now preserving the no-unsavable-accumulation philosophy. The OLED
+continues to show `FRAM ERROR`; this indicates persistence failure, not stopped VSS.
+
+Remaining port differences are the native GPIO calibration transport, checked
+DxCore Wire transactions, cooperative homing/sweep and earlier VSS interrupt
+attachment, explicit 10-bit VDD ADC setup, DA pin mapping,
+optional DA watchdog and Serial1 debug selection, and modular hardware boundaries.
+The existing page-buffered display, storage layouts/addresses/CRC/migration,
+distance arithmetic, calibration math and gauge mapping are unchanged. EVSYS/TCB
+is still deferred. Hardware timing and electrical behavior remain unvalidated.
+
+Reverified 2026-09-16: the AVR DA host suite (using the real Switec driver) and
+the original v1.12 host suite both pass. Added assertions preserve nonzero
+odometer/trip fractions after a failed save and compare FRAM contents before
+and after missing-device, short-read and corrupt-journal startup, ensuring no
+fallback odometer is committed. The mileage gate and startup-splash edits were
+already present in the working tree when this audit resumed and were retained.
+No new target build was obtained in this audit: Windows Application Control
+blocked the installed Arduino CLI. The target sizes above are historical.

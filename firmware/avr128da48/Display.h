@@ -120,6 +120,14 @@ void drawScreen(bool calibration) {
     return;
   }
   display.setFont(u8g2_font_5x7_tr);
+  // Keep the original startup greeting visible throughout cooperative homing
+  // and the sweep/holds. Persistence faults above always take precedence.
+  if (!speedometer.ready()) {
+    display.setCursor(VIEW_X, VIEW_Y);
+    display.print(F("Savoy "));
+    display.print(VERSION);
+    return;
+  }
   if (calibration) {
     if (!calibrationInputsValid) {
       display.setCursor(layout.x, max((int16_t)7, layout.y));
@@ -189,4 +197,5 @@ void beginDisplay() {
   SPI.pins(oledMosi, oledMiso, oledSck, oledCs);
   display.begin();
   display.setContrast(DimmerContrastMax);
+  updateDisplay(); // Show the startup greeting immediately, before the first loop.
 }

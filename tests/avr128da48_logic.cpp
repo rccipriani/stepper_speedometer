@@ -9,6 +9,7 @@ void fresh() {
   activeSlot=activeLayoutSlot=1;
   vehicleSpeed=VehicleSpeed{}; consumedPulses=0;
   clockUs=clockMs=0; pinLevels.fill(HIGH);
+  lastCheckpoint=lastSpeedUpdate=lastDisplayUpdate=lastAnalogUpdate=0;
   memset(&state,0,sizeof(state));
   loadState(); loadLayout();
   calibrationInputsValid=false; encoderPending=encoderQuarterSteps=0;
@@ -19,6 +20,31 @@ void fresh() {
 void encoder(uint8_t bits) {
   pinLevels[encoderA]=(bits&2)!=0; pinLevels[encoderB]=(bits&1)!=0;
   serviceCalibrationInputs();
+}
+// Exercise the scheduler and real Switec service while persistence is unavailable.
+void assertMileageStoppedWithLiveSpeed() {
+  assert(!mileagePersistenceOperational());
+  const auto frozen=state;
+  const bool dirty=storageDirty;
+  const auto memory=Wire.memory;
+  const unsigned transactions=Wire.transactions;
+  const uint32_t pulses=vehicleSpeed.totalPulses();
+  speedometer.home();
+  for (int i=0;i<64000;++i) {
+    clockUs+=1000; clockMs=clockUs/1000;
+    if (i%150==0) onVssPulse(); // 6 MPH, enough distance to cross tenths
+    loop();
+    assert(state.odoTenths==frozen.odoTenths && state.tripTenths==frozen.tripTenths);
+    assert(state.odoFraction==frozen.odoFraction && state.tripFraction==frozen.tripFraction);
+    assert(storageDirty==dirty);
+  }
+  assert(vehicleSpeed.totalPulses()>pulses && consumedPulses==vehicleSpeed.totalPulses());
+  assert(speedometer.ready() && mph>0 && motorStep>0);
+  assert(Wire.memory==memory && Wire.transactions==transactions);
+  display.labels.clear(); updateDisplay();
+  assert(display.labels.find("FRAM ERROR")!=std::string::npos);
+  clockUs+=StopTimeoutUs+1; clockMs=clockUs/1000; loop();
+  assert(mph==0 && motorStep==0);
 }
 int main() {
   const uint8_t assigned[] = {speedPulsePin,maxSecondChannelPin,motor1,motor2,motor3,motor4,
@@ -62,11 +88,26 @@ int main() {
   }
   fresh(); Wire.memory=durable; loadState();
   auto oldSlot=activeSlot; state.odoTenths++; storageDirty=true;
+  state.odoFraction=12345; state.tripFraction=67890;
   Wire.writesBeforeFailure=5; saveState();
   assert(storageFailed && storageDirty && activeSlot==oldSlot);
   unsigned tx=Wire.transactions; saveState(); assert(Wire.transactions==tx);
   clockUs=100; onVssPulse(); clockUs=150100; onVssPulse(); updateSpeedometer();
   assert(mph>0); // failed storage cannot stop needle logic
+  assertMileageStoppedWithLiveSpeed();
+  Wire.present=true; // reconnect alone cannot clear the latched fault
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); layout.x=17; layoutDirty=true; Wire.writesBeforeFailure=5; saveLayout();
+  assert(storageFailed && mileageKnown);
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); storageFault(); // verification failure can latch while transport is healthy
+  assert(fram.healthy());
+  consumedPulses=0xFFFFFFFE; collectDistance();
+  assert(consumedPulses==0 && state.odoFraction==0 && !storageDirty);
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); Wire.shortRead=true; fram.read(0); // transport unhealthy before app latch
+  assert(!storageFailed && !fram.healthy());
+  assertMileageStoppedWithLiveSpeed();
   fresh(); Wire.shortRead=true; loadState(); assert(storageFailed && !fram.healthy());
   fresh(); Wire.memory.fill(0); Wire.memory[MigrationAddress]=CommitMarker;
   auto corrupt=Wire.memory; mileageKnown=false; loadState();
@@ -111,8 +152,47 @@ int main() {
     clockUs+=800; clockMs=clockUs/1000; speedometer.update();
   }
   assert(speedometer.ready() && speedometer.targetPosition()==51);
-  fresh(); mileageKnown=false; Wire.present=false; setup();
+  fresh(); displayMode=0; display.labels.clear(); setup();
+  assert(display.labels.find(std::string("Savoy ")+VERSION)!=std::string::npos);
+  for (int i=0;i<20000 && !speedometer.ready();++i) {
+    clockUs+=1000; clockMs=clockUs/1000;
+    if (i%150==0) onVssPulse();
+    display.labels.clear(); loop();
+    if (!speedometer.ready() && !display.labels.empty())
+      assert(display.labels.find(std::string("Savoy ")+VERSION)!=std::string::npos);
+  }
+  assert(speedometer.ready() && mph>0 && state.odoFraction>0);
+  display.labels.clear(); updateDisplay();
+  assert(display.labels.find("Savoy ")==std::string::npos);
+  assert(display.labels.find("ODO")!=std::string::npos);
+  std::cout<<"PASS startup splash, live motion/mileage service and transition to normal display\n";
+  fresh(); mileageKnown=false; Wire.present=false; display.labels.clear();
+  const auto missingStartupMemory=Wire.memory;
+  setup();
+  assert(Wire.memory==missingStartupMemory);
+  assert(display.labels.find("FRAM ERROR")!=std::string::npos);
+  assert(display.labels.find("Savoy ")==std::string::npos);
   assert(storageFailed && !mileageKnown && state.ratioMilli==1000);
-  clockMs=100; loop(); // missing FRAM returns to scheduler
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); mileageKnown=false; Wire.shortRead=true;
+  const auto unreadableStartupMemory=Wire.memory;
+  setup();
+  assert(Wire.memory==unreadableStartupMemory);
+  assert(storageFailed && !mileageKnown && state.ratioMilli==1000);
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); Wire.memory.fill(0); Wire.memory[MigrationAddress]=CommitMarker;
+  mileageKnown=false;
+  const auto corruptStartupMemory=Wire.memory;
+  setup();
+  assert(Wire.memory==corruptStartupMemory);
+  assert(storageFailed && !mileageKnown);
+  assertMileageStoppedWithLiveSpeed();
+  fresh(); mileageKnown=false; // independently reject unknown mileage
+  clockUs=100; onVssPulse(); collectDistance();
+  assert(consumedPulses==1 && state.odoFraction==0 && !storageDirty);
+  fresh(); clockUs=100; onVssPulse(); collectDistance();
+  assert(mileagePersistenceOperational() && state.odoFraction==1000 && storageDirty);
+  saveState(); assert(!storageDirty);
+  std::cout<<"PASS frozen mileage/fractions, live VSS/needle, no writes or pulse backlog after FRAM faults\n";
   std::cout<<"PASS cooperative homing/sweep and missing-FRAM startup\n";
 }

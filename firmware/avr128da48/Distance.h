@@ -15,9 +15,17 @@ void addDistance(uint32_t pulses) {
   }
 }
 
+// Speed measurement/needle operation do not depend on mileage persistence.
+// A known reading alone is insufficient after a latched FRAM failure.
+bool mileagePersistenceOperational() {
+  return mileageKnown && !storageFailed && fram.healthy();
+}
+
 void collectDistance() {
   uint32_t total = vehicleSpeed.totalPulses();
-  addDistance(total - consumedPulses);
+  if (mileagePersistenceOperational()) addDistance(total - consumedPulses);
+  // Discard unpersistable pulses, including across total-counter rollover.
+  // Never leave a backlog that could later be counted as saved mileage.
   consumedPulses = total;
 }
 
