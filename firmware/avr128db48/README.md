@@ -97,16 +97,16 @@ The numeric column gives DxCore Arduino IDs, not physical package pin numbers.
 | --- | --- | --- |
 | X27 driver order 1/2/3/4 | PC0 / PC1 / PC6 / PC7 | 14 / 15 / 20 / 21 |
 | OLED MOSI / MISO reserved / SCK / CS | PA4 / PA5 / PA6 / PA7 | 4 / 5 / 6 / 7 |
-| OLED D/C / RESET | PE0 / PE1 | 30 / 31 |
+| OLED D/C / RESET | PE0 / PB4 | 30 / 12 |
 | FRAM SDA / SCL, address 0x50 | PA2 / PA3 | 2 / 3 |
 | Conditioned VSS | PC2 | 16 |
-| Encoder A / B / KEY | PC4 / PC5 / PE2 | 18 / 19 / 32 |
-| Calibration detect / mode button | PE3 / PD1 | 33 / 23 |
-| Future MAX channel 2 / RPM | PC3 / PD2 | 17 / 24 |
-| Future AFR / dimmer | PD3 / PD4 | 25 / 26 |
+| Encoder A / B / KEY | PC4 / PC5 / PB5 | 18 / 19 / 13 |
+| Calibration detect / mode button | PF4 / PF5 | 38 / 39 |
+| Future MAX channel 2 / RPM | PC3 / PF2 | 17 / 36 |
+| Future AFR / dimmer | PD0 / PF3 | 22 / 37 |
 | CDC/debug TX / RX (reserved) | PB0 / PB1 | 8 / 9 |
 
-The sole harness change is X27 PB0/PB1/PB2/PB3 -> PC0/PC1/PC6/PC7,
+The earlier DB migration moved X27 PB0/PB1/PB2/PB3 -> PC0/PC1/PC6/PC7,
 keeping coil/driver order unchanged. On EV35L43A, PB0/PB1 connect to the
 CDC debugger UART and PB2/PB3 to the button/LED and debug GPIOs. Reusing them
 for the motor would require board modifications or restrictions on debugger
@@ -117,8 +117,8 @@ Do not enable Serial1 or SPI1 over the new motor/VSS pins.
 SPI0 stays on its default PA4–PA7 route; `SPI.pins()` selects it before display
 initialization. TWI0 stays on PA2/PA3 through `Wire.pins()` before `Wire.begin()`.
 Neither bus requires a new PORTMUX alternate route. GPIO interrupt + micros()
-VSS capture and both explicit ADC calls are unchanged. PD3/PD4 are ADC0
-AIN3/AIN4; DxCore's DA/DB implementation selects ADC_RESSEL_10BIT for resolution
+VSS capture and both explicit ADC calls are unchanged. PD0/PF3 are ADC0
+AIN0/AIN19; DxCore's DA/DB implementation selects ADC_RESSEL_10BIT for resolution
 10 and VREF.ADC0REF for VDD, retaining the application's 0–1023 arithmetic.
 No OPAMP, EVSYS or TCB capture setup is added.
 
@@ -128,7 +128,8 @@ and are not spare GPIO without board modifications. Keep the existing internal
 24 MHz clock selection; neither crystal is enabled by this refactor.
 [HF crystal](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-9E425E63-BABE-4274-BF1D-58ABCA9B30C0.html),
 [LF crystal](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-CDE617E7-5792-4374-9250-E05A4BBA9198.html).
-Unassigned header GPIOs include PB4/PB5, PD0/PD5/PD6/PD7 and PF2–PF5.
+The remaining unreserved header GPIO is PD6 (also ADC0 AIN6 / DAC0 OUT).
+The nine op-amp pins below are unassigned but deliberately reserved.
 Future CAN still requires an external controller and transceiver.
 
 Why DB48 / future resources
@@ -148,22 +149,61 @@ MVIO-enabled selection. The associated MVSYSCFG fuse field is `10` in DxCore
 does not program fuses. No firmware MVIO initialization is introduced.
 [Board MVIO configuration](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-4F1B01B4-BBA9-490D-BFC3-F84D1582775E.html).
 
-The op amps stay disabled. Existing pin assignments overlap their external
-terminals; this migration does not claim that all three are freely connectable:
+The op amps stay disabled. All three complete external groups are now reserved,
+including against future RPM/AFR/dimmer assignments:
 
-| Op amp | INP / OUT / INN | Existing assignments |
+| Op amp | INP / OUT / INN | Application assignments |
 | --- | --- | --- |
-| OP0 | PD1 / PD2 / PD3 | mode button / future RPM / future AFR |
-| OP1 | PD4 / PD5 / PD7 | future dimmer / free / free |
-| OP2 | PE1 / PE2 / PE3 | OLED reset / encoder key / calibration detect |
+| OPAMP0 | PD1 / PD2 / PD3 | None |
+| OPAMP1 | PD4 / PD5 / PD7 | None |
+| OPAMP2 | PE1 / PE2 / PE3 | None |
 
-OP1 is the least constrained future option: PD5/PD7 remain free and PD4's dimmer
-input is currently disabled. Future use must resolve that reservation. No newly
-assigned motor pin consumes an op-amp terminal. OP0/OP2 use would require a later
-harness/resource decision. Internal op amps must operate within their specified
-input common-mode limits; they are not direct battery-voltage high-side shunt
-amplifiers. No current sensing or analog conditioning is implemented.
+PE1 is OPAMP2 INP and PE2 is OUT. BoardConfig.h asserts that every terminal
+remains unassigned, including all current signals and future reservations.
+Internal op amps must operate within their specified input common-mode limits;
+they are not direct battery-voltage high-side shunt amplifiers. No current
+sensing or analog conditioning is implemented.
 [DB device multiplexing table](https://onlinedocs.microchip.com/oxy/GUID-6318BE6B-F1CD-430E-AE84-1881DD64DB3F-en-US-10/GUID-FFC15B69-9C4E-475D-B8A0-47C61A53A842.html).
+
+Pin optimization against 17640ba (2026-09-17): only these seven assignments move.
+All other entries in the wiring table above are unchanged.
+
+| Signal | Old | New (DxCore ID) | Selection reason |
+| --- | --- | --- | --- |
+| OLED RESET | PE1 | PB4 (12) | Digital-only spare; releases OPAMP2 INP |
+| Encoder KEY | PE2 | PB5 (13) | Adjacent digital-only spare; releases OPAMP2 OUT |
+| Calibration detect | PE3 | PF4 (38) | Unloaded header GPIO, paired with mode |
+| Mode button | PD1 | PF5 (39) | Unloaded header GPIO, paired with calibration |
+| Future RPM | PD2 | PF2 (36) | Full asynchronous interrupt detection on Px2 |
+| Future AFR | PD3 | PD0 (22) | ADC0 AIN0 without an op-amp terminal |
+| Future dimmer | PD4 | PF3 (37) | ADC0 AIN19; preserves PD6's DAC output as a spare |
+
+Verified against the device multiplexing table linked above, the
+[EV35L43A target-MCU schematic](https://ww1.microchip.com/downloads/aemDocuments/documents/MCU08/ProductDocuments/UserGuides/AVR128DB48-Curiosity-Nano-HW-UserG-DS50003037A.pdf)
+(Appendix 8.1), the header pinout, and installed DxCore 1.6.2 48pin-standard.
+PB4, PB5, PF4, PF5, PF2, PD0 and PF3 each appear on the board headers,
+without debugger, LED/button or crystal loads. No board modification or new
+PORTMUX route is needed. The original spare list was correct: PB4/PB5,
+PD0/PD5/PD6/PD7 and PF2-PF5. Seven are now assigned; PD5/PD7 join the
+op-amp reservations and PD6 remains spare. PF2-PF5 also have ADC capability;
+using two for switches avoids consuming PD6's unique DAC output. PF3 supports
+the existing single-ended dimmer read; AIN19 cannot be a differential ADC
+negative input. DxCore maps digital PD0/PF3 to AIN0/AIN19 respectively.
+Resolution, reference, analog math and disabled-by-default options are unchanged.
+
+Resource tradeoffs: PF4/PF5 now preclude USART2's alternate TX/RX route, PF2/PF3
+preclude default TWI1, and PB4/PB5 preclude USART3's alternate route. Do not enable
+those routes or PWM outputs over the harness. CDC stays USART3 default PB0/PB1.
+Future GPS/UART use needs a fresh resource decision. OLED D/C stays on PE0 to
+keep this change focused; its ADC/comparator function remains occupied.
+No current peripheral conflicts are introduced and no future feature is enabled.
+
+Keep PORTC unchanged and MVIO disabled. In DS50003037A the supply link is R204
+and the supply header is J212. The newer
+[schematic](https://ww1.microchip.com/downloads/aemDocuments/documents/MCU08/ProductDocuments/BoardDesignFiles/AVR128DB48-Curiosity-Nano-Schematics.pdf)
+renumbers the target supply link R100/J112. Identify the actual board revision
+and verify VDDIO2-to-VDD continuity before wiring, rather than relying only on
+reference designators. Leave the normal single-supply link fitted.
 
 For external regulated 5 V, follow Microchip's [external-supply instructions](https://onlinedocs.microchip.com/oxy/GUID-6CA1AB73-CC02-402B-94AF-05A7A2D78030-en-US-1/GUID-BAA668EF-E4C0-44A9-866D-9A3B949DF2EA.html):
 feed VTG, and ground VOFF to disable the on-board regulator when USB is connected.
@@ -317,3 +357,13 @@ compiled successfully, but Windows Application Control blocked its execution
 is separate from the blocked Arduino target compilation. `git diff --check`
 passed (with CR-at-EOL handling for the repository's Windows line endings);
 new/renamed files were also checked for trailing whitespace.
+
+Pin optimization verification (2026-09-17): default and DEBUG_SERIAL DB48 host
+suites both pass using the real Switec driver; all behavioral tests are retained.
+The harness assertions and all three OPAMP reservation assertions compile.
+Zig caches were placed under port_support to avoid sandbox cache permissions.
+The real DxCore AVR128DB48 compile with the documented FQBN and local
+arduino-cli.yaml was attempted: Windows Application Control blocked
+arduino-cli.exe from starting. No target-build success or hardware validation
+is claimed. git diff --check passes. Only BoardConfig.h, this README and
+the DB48 harness assertions changed; application logic is unchanged.

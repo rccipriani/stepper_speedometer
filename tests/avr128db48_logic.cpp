@@ -47,6 +47,10 @@ void assertMileageStoppedWithLiveSpeed() {
   assert(mph==0 && motorStep==0);
 }
 int main() {
+  static_assert(Board::oledReset==PIN_PB4 && Board::encoderKey==PIN_PB5 &&
+                Board::calSwitchPin==PIN_PF4 && Board::modeButtonPin==PIN_PF5 &&
+                Board::rpmPulsePin==PIN_PF2 && Board::afrInputPin==PIN_PD0 &&
+                Board::dimmerInputPin==PIN_PF3, "DB Nano analog-preserving harness");
   static_assert(Board::motor1==PIN_PC0 && Board::motor2==PIN_PC1 &&
                 Board::motor3==PIN_PC6 && Board::motor4==PIN_PC7, "DB Nano motor harness");
   static_assert(offsetof(StoredState,crc)==30 && offsetof(StoredState,odoFraction)==16 &&
